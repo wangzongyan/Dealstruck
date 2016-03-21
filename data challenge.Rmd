@@ -1,0 +1,202 @@
+---
+title: "Data Challenge"
+author: "Zongyan Wang"
+date: "March 15, 2016"
+output: pdf_document
+---
+# How to use
+To use the .Rmd file, it will send the user a request during the compiling to choose the data loaded. For the first request, please upload "LC\_biz\_all.csv". Please also place "importanceRank.txt" and "state\_latlon.csv" in your work directory. Thanks \
+Please notice, this .Rmd file would also require clean\_f.R, plot\_f.R, analysis\_f.R.
+
+# Upload packages for data clean and analysis
+```{r}
+require(plyr)  #data clean
+require(dplyr) #data clean
+require(tidyr) #data clean
+require(ggplot2)  # visualzation
+require(XML)   # web scriping
+require(testthat) #test model
+require(kernlab) # kernel and SVM
+require(reshape2) 
+require(caret) # Cross - Validation k fold
+require(maps) # heatmap: map_data
+require(ggmap) # for heatmap
+```
+# Read file
+```{r}
+# Read Data and function files
+LC <- read.csv(file.choose(), header = T) #Please read LC_biz_all.csv
+source("clean_f.R") # functions for cleaning the data
+source("plot_f.R") # functions for plot(heatmap)
+source("analysis_f.R") # functions for plot and data analysis
+```
+
+# Data clean
+```{r}
+lc <- perToN(LC)  # transfer percentage to numeric
+lc <- replaceBlank_all(lc) # replace the blank
+lc <- dateToNum(lc) # transform earliest_cr_line from date to numeric
+
+```
+
+# Data Summary
+## Data overview
+```{r}
+dim(lc)               #variable size
+hasNA_all(lc)            # variables contains missing values
+length(hasNA_all(lc))
+n.factor_all(lc)       # factor levels in variables among the data
+length(n.factor_all(lc))
+loan <- lc %>% 
+  ddply(~loan_status, function(x) dim(x)[1]) %>%
+  mutate(loan_status = reorder(x = loan_status,X = V1))
+  
+loanplot <- ggplot(loan, aes(x = loan_status, y = V1, fill = loan_status)) +
+  geom_point(aes(color = loan_status),size = 4) +
+  labs(y = "Amount", title = "Loan Status Summary") 
+print(loanplot)
+ggsave(filename = "loanplot.png", plot = loanplot, path = ".",  
+       width = 10, height = 6, dpi = 400)
+```
+
+
+## Delete uninteresting variables
+```{r}
+#exclude loan_status, id, last payment day, next payment day, zip_code, issue_d
+lc <- lc %>% select(-id,  -emp_title,
+                    -last_pymnt_d, -next_pymnt_d,
+                    -zip_code,-issue_d, -last_credit_pull_d)
+```
+
+## Paid off ratio over United States
+```{r}
+lc_fullypaid <- lc_ratio(lc, "Fully_Paid")
+plot_fullypaid <- lc_heatmap(lc_fullypaid, state, location,
+                             "Paid off Ratio over States")
+print(plot_fullypaid)
+ggsave(filename = "plot_fullypaid.png", plot = plot_fullypaid, path = ".",  
+       width = 6, height = 6, dpi = 400)
+```
+## paid off and current (Good loan) ratio over United Status
+```{r}
+lc_current <- lc_ratio(lc, "Current")
+lc_goodLoan <- merge(lc_current, lc_fullypaid, by = "addr_state")
+lc_goodLoan <- lc_goodLoan %>% mutate(ratio = ratio.x + ratio.y) %>%
+  select(-c(ratio.x,ratio.y))
+plot_goodLoan <- lc_heatmap(lc_goodLoan, state, location,
+                            "Good Loan (Paid Off + Current) Ratio over States")
+print(plot_goodLoan)
+ggsave(filename = "plot_goodLoan.png", plot = plot_goodLoan, path = ".",  
+       width = 6, height = 6, dpi = 400)
+```
+
+# Data Analysis
+## variable selection
+```{r}
+rank <- read.table("importanceRank.txt", header = T) # The list of important variables(importanceRank.txt) form GUIDE
+rank <- rank %>% mutate(Variable = reorder(x = Variable, X = Scaled))
+## plot rank
+rankPlot <- rank %>% ggplot(aes(x = Variable, y = Scaled)) +
+  geom_point(aes(color = Variable), size = 3)
+print(rankPlot)
+ggsave(filename = "rankPlot.png", plot = rankPlot, path = ".",  
+       width = 10, height = 6, dpi = 400)
+## Select the important data in original data
+lc_i <- lc[,names(lc)%in%as.character(rank$Variable)]
+lc_i$loan_status <- lc$loan_status
+## Summary of new data
+hasNA_all(lc_i)  # Variable has missing data
+n.factor_all(lc_i)  # Levels of Variable which are categorical data
+```
+
+## logistic regression
+```{r}
+# resample the data with delinquency events
+lc.sample <- sample_n(lc_i %>% subset(!loan_status %in% c("Current", "Fully_Paid")), 3000, replace = T)
+lc_ii <- rbind(lc_i, lc.sample)
+
+# weight other 10 times higher than good loan
+
+
+# Remove all the rows with NA
+lc_i <- lc_i[-which(is.na(lc$percent_bc_gt_75)),]
+# Data analysis
+status <- as.character(levels(lc_i$loan_status))
+# Set "Charged Off" to 1
+log_charge <- log.loan(lc_i, status[1])
+#model(log_charge, status[1])
+# Set "Current" to 1
+log_current <- log.loan(lc_i, status[2])
+# Set "Default" to 1
+log_default <- log.loan(lc_i, status[3])
+# Set "Fully Paid" to 1
+log_fd <- log.loan(lc_i, status[4])
+# Set "In_Grace_Period" to 1
+log_grace <- log.loan(lc_i, status[5])
+# Set "Late_(16-30 days)" to 1
+log_late1 <- log.loan(lc_i, status[6])
+# Set "Late_(31 - 120 days)" to 1
+log_late2 <- log.loan(lc_i, status[7])
+
+# Plot the significant value
+l.list <- list(log_charge, log_current, log_default, log_fd, log_grace, log_late1, log_late2)
+plot_coeff <- coeff_plot(l.list,status, sig = F)
+plot_significant <- coeff_plot(l.list, status, sig = T)
+print(plot_coeff)
+ggsave(filename = "plot_coeff.png", plot = plot_coeff, path = ".",  
+       width = 10, height = 6, dpi = 400)
+print(plot_significant)
+ggsave(filename = "plot_significant.png", plot = plot_significant, path = ".",  
+       width = 10, height = 6, dpi = 400)
+```
+## multi-level Logistic regression model accuracy
+```{r, warning= F}
+## in-sample error
+l.list <- glm_list(lc_i, status)
+in_sample_pred <- predict_glm(l.list, lc_i, status)
+in_sample_error <- 1 - sum(in_sample_pred == lc_i$loan_status)/length(lc_i[,1])
+in_sample_error
+# plot classification result
+plot_mis1 <- mis_plot(true = lc_i$loan_status, pred = in_sample_pred)
+print(plot_mis1)
+ggsave(filename = "plot_mis1.png", plot = plot_mis1, path = ".",  
+       width = 10, height = 6, dpi = 400)
+
+
+## in-sample error
+l.list <- glm_list(lc_i, status)
+in_sample_pred <- predict_glm(l.list, lc_i, status)
+in_sample_error <- 1 - sum(in_sample_pred == lc_i$loan_status)/length(lc_i[,1])
+in_sample_error
+# plot classification result
+plot_mis2 <- mis_plot(true = lc_i$loan_status, pred = in_sample_pred)
+print(plot_mis2)
+ggsave(filename = "plot_mis2.png", plot = plot_mis2, path = ".",  
+       width = 10, height = 6, dpi = 400)
+## Cross-Validation error
+cv_error <- cv_k(lc_i)
+cv_error
+
+```
+## Kernel methods
+```{r}
+  
+
+  # sample SVM model"
+svmmodel <- svm(lc_svm,"Fully_Paid")
+
+  #our SVM model
+newdata <- as.matrix(lc_svm%>% select(-loan_status))
+kern.list <- kern_list(lc_svm)
+pred_svm <- pred.svm(kern.list, newdata, status = status)
+
+in_sample_error_kern <- 1 - sum(pred_svm == lc_i$loan_status)/length(lc_i[,1])
+in_sample_error_kern
+# plot classification result
+plot_mis_kern <- mis_plot(true = lc_ii$loan_status, pred = pred_svm)
+print(plot_mis_kern)
+ggsave(filename = "plot_mis2.png", plot = plot_mis2, path = ".",  
+       width = 10, height = 6, dpi = 400)
+
+
+```
