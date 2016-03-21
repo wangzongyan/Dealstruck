@@ -112,11 +112,13 @@ n.factor_all(lc_i)  # Levels of Variable which are categorical data
 ## logistic regression
 ```{r}
 # resample the data with delinquency events
-lc.sample <- sample_n(lc_i %>% subset(!loan_status %in% c("Current", "Fully_Paid")), 3000, replace = T)
+lc.sample <- sample_n(lc_i %>% subset(!loan_status %in% c("Current", "Fully_Paid")), 4000, replace = T)
 lc_ii <- rbind(lc_i, lc.sample)
 
 # weight other 10 times higher than good loan
-
+lc_iii <- lc_i
+lc_iii$weight <- 1
+lc_iii$weight[!lc_i$loan_status %in% c("Current", "Fully_Paid")] <- 10
 
 # Remove all the rows with NA
 lc_i <- lc_i[-which(is.na(lc$percent_bc_gt_75)),]
@@ -149,7 +151,7 @@ print(plot_significant)
 ggsave(filename = "plot_significant.png", plot = plot_significant, path = ".",  
        width = 10, height = 6, dpi = 400)
 ```
-## multi-level Logistic regression model accuracy
+## multi-level Logistic regression model accuracy(without weight)
 ```{r, warning= F}
 ## in-sample error
 l.list <- glm_list(lc_i, status)
@@ -161,11 +163,13 @@ plot_mis1 <- mis_plot(true = lc_i$loan_status, pred = in_sample_pred)
 print(plot_mis1)
 ggsave(filename = "plot_mis1.png", plot = plot_mis1, path = ".",  
        width = 10, height = 6, dpi = 400)
-
-
+```
+## multi-level Logistic regression model accuracy(resample)
+```{r}
 ## in-sample error
-l.list <- glm_list(lc_i, status)
-in_sample_pred <- predict_glm(l.list, lc_i, status)
+newdata <- lc_i
+l.list <- glm_list(lc_ii, status)
+in_sample_pred <- predict_glm(l.list, newdata, status)
 in_sample_error <- 1 - sum(in_sample_pred == lc_i$loan_status)/length(lc_i[,1])
 in_sample_error
 # plot classification result
@@ -173,30 +177,62 @@ plot_mis2 <- mis_plot(true = lc_i$loan_status, pred = in_sample_pred)
 print(plot_mis2)
 ggsave(filename = "plot_mis2.png", plot = plot_mis2, path = ".",  
        width = 10, height = 6, dpi = 400)
-## Cross-Validation error
-cv_error <- cv_k(lc_i)
-cv_error
+
+```
+
+
+## multi-level Logistic regression model accuracy(weight)
+```{r}
+## in-sample error
+newdata <- lc_i
+newdata$weight <- 1
+l.list <- glm_list(lc_iii, status)
+in_sample_pred <- predict_glm(l.list, newdata, status)
+in_sample_error <- 1 - sum(in_sample_pred == lc_iii$loan_status)/length(lc_iii[,1])
+in_sample_error
+# plot classification result
+plot_mis3 <- mis_plot(true = lc_i$loan_status, pred = in_sample_pred)
+print(plot_mis3)
+ggsave(filename = "plot_mis3.png", plot = plot_mis3, path = ".",  
+       width = 10, height = 6, dpi = 400)
+
 
 ```
 ## Kernel methods
 ```{r}
-  
-
-  # sample SVM model"
-svmmodel <- svm(lc_svm,"Fully_Paid")
+lc_svm_i <- prep_svm(lc_i)  
+# resample data for svm
+lc_svm_ii <- prep_svm(lc_ii)
+# sample SVM model"
+svmmodel <- svm(lc_svm_i,"Fully_Paid")
 
   #our SVM model
-newdata <- as.matrix(lc_svm%>% select(-loan_status))
-kern.list <- kern_list(lc_svm)
+newdata <- as.matrix(lc_svm_i%>% select(-loan_status))
+kern.list <- kern_list(lc_svm_i)
 pred_svm <- pred.svm(kern.list, newdata, status = status)
 
 in_sample_error_kern <- 1 - sum(pred_svm == lc_i$loan_status)/length(lc_i[,1])
 in_sample_error_kern
 # plot classification result
-plot_mis_kern <- mis_plot(true = lc_ii$loan_status, pred = pred_svm)
+plot_mis_kern <- mis_plot(true = lc_i$loan_status, pred = pred_svm)
 print(plot_mis_kern)
-ggsave(filename = "plot_mis2.png", plot = plot_mis2, path = ".",  
+ggsave(filename = "plot_mis_kern.png", plot = plot_mis_kern, path = ".",  
        width = 10, height = 6, dpi = 400)
 
 
+```
+# SVM for data after resampling
+```{r}
+#our SVM model
+newdata <- as.matrix(lc_svm_i%>% select(-loan_status))
+kern.list2 <- kern_list(lc_svm_ii)
+pred_svm2 <- pred.svm(kern.list2, newdata, status = status)
+
+in_sample_error_kern2 <- 1 - sum(pred_svm == lc_i$loan_status)/length(lc_i[,1])
+in_sample_error_kern2
+# plot classification result
+plot_mis_kern2 <- mis_plot(true = lc_i$loan_status, pred = pred_svm2)
+print(plot_mis_kern2)
+ggsave(filename = "plot_mis_kern2.png", plot = plot_mis_kern2, path = ".",  
+       width = 10, height = 6, dpi = 400)
 ```

@@ -51,7 +51,12 @@ transf_loan <- function(data, level){
 
 # logistic regression
 logistic <- function(data){
-  l<-glm(y~., data, family=binomial(link = "logit"))
+  if(length(data$weight) >0){
+    l<-glm(y~., data, weights = weight, family=binomial(link = "logit"))
+  }else{
+    l<-glm(y~., data, family=binomial(link = "logit"))
+  }
+  
   return(l)
 }
 
@@ -191,5 +196,5 @@ pred.svm <- function(kern.list, newdata, status = status){
     mutate(max = apply(., 1, function(x) names(p.dataframe)[which.max(x)]))
   pred <- as.data.frame(pred)
   return(pred$max)
-  
+ 
 }
